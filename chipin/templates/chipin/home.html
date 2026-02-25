@@ -3,35 +3,35 @@
 {% block title %}ChipIn{% endblock %}
 
 {% block content %}
-<h1>ChipIn</h1>
-<p>This page is for ChipIn group functions.</p>
+ <h1>Welcome, {{ user.get_username }}</h1>
+
+  <div class="card">
+    <div class="row">
+      <strong>Authentication status:</strong>
+      {% if is_verified %}
+        <span>✅ 2FA verified for this session.</span>
+      {% elif has_device %}
+        <span>⚠️ You have 2FA set up, but you’re not verified in this session.</span>
+      {% else %}
+        <span>❌ No 2FA device enrolled yet.</span>
+      {% endif %}
+    </div>
+
+    <div class="row">
+      {% if not has_device %}
+        <!-- Start the setup wizard -->
+        <a class="btn btn-primary" href="{% url 'two_factor:setup' %}">Setup 2FA (scan QR)</a>
+      {% else %}
+        <a class="btn" href="{% url 'two_factor:profile' %}">Manage 2FA</a>
+        <a class="btn" href="{% url 'two_factor:backup_tokens' %}">Backup codes</a>
+        <a class="btn" href="{% url 'two_factor:disable' %}">Disable 2FA</a>
+      {% endif %}
+    </div>
+    <hr>
+  </div>
+
+  <p style="margin-top:2rem;">
+    Try visiting a protected page that <em>requires</em> OTP:
+    <a href="{% url 'chipin:sensitive' %}">Sensitive area</a>
+  </p>
 {% endblock %}
-{% load static %}
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <title>ChipIn Homepage</title>
-    <link rel="stylesheet" href="{% static 'chipin/styles.css' %}">
-</head>
-<body>
-    <div class="header">
-        <div class="logo">
-            <img src="{% static 'chipin/logo_90.jpg' %}" alt="Logo">
-        </div>
-        <div class="user-info">
-            <span>{{ request.user.username }}</span>
-            <form action="{% url 'users:logout' %}" method="post" style="margin: 0; margin-left: 20px;">
-                {% csrf_token %}
-                <button type="submit">Log out</button>
-            </form>
-        </div>
-    </div>   
-    {% if messages %}
-        <ul class="messages">
-        {% for message in messages %}
-            <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
-        {% endfor %}
-        </ul>
-    {% endif %}
-</body>
-</html>
