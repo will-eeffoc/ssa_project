@@ -1,10 +1,13 @@
+from decimal import Decimal
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.auth.models import User
 from django.utils import timezone
 from django.conf import settings
-from .models import Group, Invite, GroupJoinRequest, Comment, Event
+from django.db import transaction  # atomic transactions for fund transfers
+from django.db.models import F  # safe concurrent balance updates
+from .models import Group, Invite, GroupJoinRequest, Comment, Event, Transaction
 from .forms import GroupCreationForm, CommentForm
 from django.urls import reverse
 
@@ -16,12 +19,17 @@ def home(request):
     user_groups = user.group_memberships.all()  # Get groups the user is a member of
     user_join_requests = GroupJoinRequest.objects.filter(user=user)  # Get join requests sent by the user
     available_groups = Group.objects.exclude(members=user).exclude(join_requests__user=user) # Get groups the user is not a member of and the user has not requested to join
+    # get user's transaction history (newest first)
+    transactions = Transaction.objects.filter(
+        user=request.user
+    ).order_by('-created_at')
     context = {
         'pending_invitations': pending_invitations,
         'user_groups': user_groups,
         'user_join_requests': user_join_requests,
         'available_groups': available_groups,
-        'balance': profile.balance
+        'balance': profile.balance,
+        'transactions': transactions,  # show transaction history on home page
     }
     return render(request, 'chipin/home.html', context)
 
@@ -330,3 +338,114 @@ def delete_event(request, group_id, event_id):
     event.delete()
     messages.success(request, f"The event '{event.name}' has been deleted.")
     return redirect('chipin:group_detail', group_id=group.id)
+
+@login_required
+def transfer_funds(request, group_id, event_id):
+    event = get_object_or_404(Event, id=event_id, group__id=group_id)
+    group = event.group
+
+    # fault-tolerant fund transfer: validates, checks eligibility, does atomic transactions
+    
+    # only POST allowed (prevents csrf attacks)
+    if request.method != "POST":
+        messages.error(request, "Invalid request method for transferring funds.")
+        return redirect('chipin:group_detail', group_id=group_id)
+
+    # only group admin can do this
+    if request.user != group.admin:
+        messages.error(request, "Only the group admin can transfer funds.")
+        return redirect('chipin:group_detail', group_id=group_id)
+
+    # no double transfers allowed
+    if event.status == Event.Status.ARCHIVED:
+        messages.error(request, "Funds have already been transferred for this event.")
+        return redirect('chipin:group_detail', group_id=group_id)
+
+    # grab event members, or fall back to group members
+    payers_qs = event.members.select_related("profile")
+    if not payers_qs.exists():
+        payers_qs = group.members.select_related("profile")
+    payers = list(payers_qs)
+
+    # include the admin if not already there
+    include_admin_in_payers = True
+    if include_admin_in_payers and group.admin not in payers:
+        payers.append(group.admin)
+
+    if not payers:
+        messages.error(request, "No payers found for this event.")
+        return redirect('chipin:group_detail', group_id=group_id)
+
+    # first pass: filter out users with zero or negative balance
+    rough_eligible = [u for u in payers if u.profile.balance > 0]
+
+    if not rough_eligible:
+        messages.error(request, "No members have a positive balance to contribute.")
+        return redirect('chipin:group_detail', group_id=group_id)
+
+    # calculate share from the rough pool
+    share = event.total_spend / Decimal(len(rough_eligible))
+
+    # second pass: see who actually can afford the share
+    final_payers = []
+    excluded = []
+    for u in rough_eligible:
+        if u.profile.balance >= share:
+            final_payers.append(u)
+        else:
+            excluded.append(u)
+
+    if not final_payers:
+        messages.error(
+            request,
+            "No participants could afford the share amount. Transfer cancelled."
+        )
+        return redirect('chipin:group_detail', group_id=group_id)
+
+    # recalculate share based on actual payers
+    final_share = event.total_spend / Decimal(len(final_payers))
+
+    # all-or-nothing: transfer funds and archive event together
+    with transaction.atomic():
+        # subtract from each payer (using F() for safe concurrent updates)
+        for u in final_payers:
+            u.profile.balance = F("balance") - final_share
+            u.profile.save(update_fields=["balance"])
+            # log the contribution
+            Transaction.objects.create(
+                user=u,
+                amount=-final_share,
+                created_at=timezone.now(),
+                description=f"Contribution for event '{event.name}'"
+            )
+
+        # add total spend to admin
+        admin_profile = group.admin.profile
+        admin_profile.balance = F("balance") + event.total_spend
+        admin_profile.save(update_fields=["balance"])
+        # log the receipt
+        Transaction.objects.create(
+            user=group.admin,
+            amount=event.total_spend,
+            created_at=timezone.now(),
+            description=f"Funds received for event '{event.name}'"
+        )
+
+        # mark event done and save when it happened
+        event.status = Event.Status.ARCHIVED
+        event.archived_at = timezone.now()
+        event.save(update_fields=["status", "archived_at"])
+
+    # Create a human-readable message for the admin
+    msg = (
+        f"Transferred ${event.total_spend} "
+        f"(${final_share:.2f} each) "
+        f"from {len(final_payers)} payer(s)."
+    )
+
+    if excluded:
+        excluded_names = ", ".join(u.username for u in excluded)
+        msg += f" Excluded due to insufficient balance: {excluded_names}."
+
+    messages.success(request, msg)
+    return redirect('chipin:group_detail', group_id=group_id)
