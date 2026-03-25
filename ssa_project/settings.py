@@ -1,12 +1,22 @@
 from pathlib import Path
+import os
 
+with open('.env') as i:
+    for line in i:
+        key, value = line.strip().split('=', 1)
+        os.environ[key] = value
+
+SECRET_KEY = os.environ['DJANGO_SECRET_KEY']
+RECAPTCHA_SECRET_KEY = os.environ['RECAPTCHA_SECRET_KEY']
+WEB3FORMS_ACCESS_KEY = os.environ['WEB3FORMS_ACCESS_KEY']
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 BASE_DIR = Path(__file__).resolve().parent.parent
 SITE_ORIGIN = "http://localhost:8000"  
-WEB3FORMS_ACCESS_KEY = "a3912a13-7eda-4b6e-88bd-d1b6c75a206e"
-SECRET_KEY = 'django-insecure-skz(uf^snv+u%u@2+9mtud&-v2+z&z5_*f)*%!@7(ornlge40w'
+# WEB3FORMS access key is now in .env
+# Django secret key is now in .env
 DEBUG = True
 ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
-RECAPTCHA_SECRET_KEY = "6LeMRm4qAAAAAPslEmmSL7zQBpwLV-YHw0R99ytB"
+# Recaptcha secret key is now in .env
 INSTALLED_APPS = [
     'users',
     'chipin',

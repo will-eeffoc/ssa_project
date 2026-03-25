@@ -1,5 +1,25 @@
 from django import forms
-from .models import Group, Comment
+from .models import Group, Comment, Event
+import datetime
+
+import datetime
+
+class EventCreationForm(forms.ModelForm): #create the new form to validate the input for event creation
+    class Meta:
+        model = Event
+        fields = ['name', 'date', 'total_spend']
+
+    def clean_total_spend(self):
+        value = self.cleaned_data.get('total_spend')
+        if value is None or value <= 0:
+            raise forms.ValidationError("Total spend must be a positive number.")
+        return value
+
+    def clean_date(self):
+        date = self.cleaned_data.get('date')
+        if date and date < datetime.date.today():
+            raise forms.ValidationError("Event date cannot be in the past.")
+        return date
 
 class CommentForm(forms.ModelForm):
     class Meta:
@@ -11,8 +31,9 @@ class CommentForm(forms.ModelForm):
     # Clean the content to sanitise input
     def clean_content(self):
         content = self.cleaned_data.get('content')
-        if "<script>" in content.lower():  # Prevent XSS by checking for script tags
-            raise forms.ValidationError("Invalid content.")
+        for i, char in enumerate(content):
+            if char == '<' and '>' in content[i:]:
+                raise forms.ValidationError("Invalid content.")
         return content
 
 class GroupCreationForm(forms.ModelForm):

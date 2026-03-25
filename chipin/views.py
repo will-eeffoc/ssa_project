@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from django.conf import settings
 from .models import Group, Invite, GroupJoinRequest, Comment, Event
-from .forms import GroupCreationForm, CommentForm
+from .forms import GroupCreationForm, CommentForm, EventCreationForm
 from django.urls import reverse
 
 @login_required
@@ -95,6 +95,9 @@ def delete_group(request, group_id):
 @login_required
 def invite_users(request, group_id):
     group = get_object_or_404(Group, id=group_id)
+    if request.user != group.admin:
+        messages.error(request, "Only the group admin can invite users.")
+        return redirect('chipin:group_detail', group_id=group.id)
     users_not_in_group = User.objects.exclude(id__in=group.members.values_list('id', flat=True))
     if request.method == 'POST':
         user_id = request.POST.get('user_id')
@@ -159,6 +162,7 @@ def leave_group(request, group_id):
     messages.success(request, f'You left "{group.name}".')
     return redirect("chipin:home")
 
+@login_required
 def request_to_join_group(request, group_id):
     group = get_object_or_404(Group, id=group_id)
     # Check if the user is already a member
@@ -238,18 +242,16 @@ def create_event(request, group_id):
         messages.error(request, "Only the group administrator can create events.")
         return redirect('chipin:group_detail', group_id=group.id)
     if request.method == 'POST':
-        event_name = request.POST.get('name')
-        event_date = request.POST.get('date')
-        total_spend = request.POST.get('total_spend')
-        event = Event.objects.create(
-            name=event_name,
-            date=event_date,
-            total_spend=total_spend,
-            group=group
-        )
-        messages.success(request, f'Event "{event_name}" created successfully!')
-        return redirect('chipin:group_detail', group_id=group.id)
-    return render(request, 'chipin/create_event.html', {'group': group})
+        form = EventCreationForm(request.POST)
+        if form.is_valid():
+            event = form.save(commit=False)
+            event.group = group
+            event.save()
+            messages.success(request, f'Event "{event.name}" created successfully!')
+            return redirect('chipin:group_detail', group_id=group.id)
+    else:
+        form = EventCreationForm()
+    return render(request, 'chipin/create_event.html', {'group': group, 'form': form})
 
 @login_required
 def join_event(request, group_id, event_id):

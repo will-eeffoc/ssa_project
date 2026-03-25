@@ -4,18 +4,7 @@
 
 <form method="POST">
     {% csrf_token %}
-    <div>
-        <label for="name">Event Name</label>
-        <input type="text" name="name" required>
-    </div>
-    <div>
-        <label for="date">Event Date</label>
-        <input type="date" name="date" required>
-    </div>
-    <div>
-        <label for="total_spend">Total Spend</label>
-        <input type="number" name="total_spend" step="1.00" required>
-    </div>
+    {{ form.as_p }}
     <button type="submit">Create Event</button>
 </form>
 
